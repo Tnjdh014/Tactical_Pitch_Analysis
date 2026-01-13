@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elite Tactical Pitch Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@500&display=swap');
+        
+        body { 
+            background-color: #020617; 
+            color: #f8fafc; 
+            font-family: 'Inter', sans-serif; 
+            height: 100vh; 
+            overflow: hidden; 
+        }
+
+        .pitch-canvas {
+            background-color: #064e3b;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        .pitch-canvas.drag-over {
+            border-color: #3b82f6;
+            background-color: #065f46;
+        }
+
+        .player-card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255,255,255,0.05);
+            transition: all 0.2s ease;
+            cursor: grab;
+            user-select: none;
+        }
+
+        .player-card:active { cursor: grabbing; }
+        .player-card:hover {
+            background: rgba(51, 65, 85, 0.5);
+            border-color: #3b82f6;
+        }
+
+        .player-card.active {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: #3b82f6;
+        }
+
+        .def-unit { filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.5)); }
+        .ball-unit { filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.8)); }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    </style>
+</head>
+<body class="flex">
+
+    <!-- Left Sidebar -->
+    <aside class="w-80 bg-slate-950 border-r border-slate-800 p-6 flex flex-col gap-4 z-10">
+        <div>
+            <h1 class="text-xl font-black tracking-tighter text-blue-500 italic uppercase">Tactical Lab</h1>
+            <p class="text-[10px] text-slate-500 font-mono tracking-widest uppercase">Scouting Database & Historicals</p>
+        </div>
+
+        <div id="player-list" class="flex flex-col gap-4 overflow-y-auto pr-2">
+            <!-- Populated by JS -->
+        </div>
+
+        <div class="mt-auto border-t border-slate-800 pt-4">
+            <div id="mini-radar" class="h-32 w-full flex items-center justify-center">
+                <svg id="radar-svg" viewBox="0 0 100 100" class="h-full"></svg>
+            </div>
+            <p class="text-[10px] text-center text-slate-500 mt-2 font-bold tracking-widest uppercase">Attributes Profile</p>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8 flex flex-col gap-6 overflow-hidden">
+        <header class="flex justify-between items-end">
+            <div>
+                <span id="role-tag" class="text-xs font-bold text-blue-400 tracking-widest uppercase">---</span>
+                <h2 id="player-name" class="text-5xl font-black tracking-tighter uppercase leading-none">---</h2>
+            </div>
+            <div class="flex gap-8 border-l border-slate-800 pl-8">
+                <div class="text-right">
+                    <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Efficiency Benchmark</p>
+                    <p id="top-stat" class="text-3xl font-black text-white">---</p>
+                </div>
+            </div>
+        </header>
+
+        <div class="pitch-canvas flex-1 overflow-hidden relative" id="pitch-container">
+            <div id="drop-zone-overlay" class="absolute inset-0 z-20 pointer-events-none flex items-center justify-center opacity-0 transition-opacity">
+                <div class="bg-blue-600/20 border-2 border-dashed border-blue-400 p-8 rounded-2xl">
+                    <p class="text-blue-400 font-black uppercase tracking-widest">Drop Player to Analyze</p>
+                </div>
+            </div>
+
+            <svg viewBox="0 0 800 500" class="w-full h-full" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                    <pattern id="grass" x="0" y="0" width="80" height="500" patternUnits="userSpaceOnUse">
+                        <rect x="0" y="0" width="40" height="500" fill="#064e3b" />
+                        <rect x="40" y="0" width="40" height="500" fill="#054635" />
+                    </pattern>
+                </defs>
+                <rect width="800" height="500" fill="url(#grass)" />
+                <g stroke="rgba(255,255,255,0.3)" stroke-width="2" fill="none">
+                    <rect x="20" y="20" width="760" height="460" />
+                    <line x1="400" y1="20" x2="400" y2="480" />
+                    <circle cx="400" cy="250" r="60" />
+                    <rect x="620" y="100" width="160" height="300" /> 
+                    <rect x="20" y="100" width="160" height="300" />
+                </g>
+                <g id="visual-layer"></g>
+            </svg>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6">
+            <div class="col-span-2 bg-slate-900/50 rounded-xl p-5 border border-slate-800">
+                <h3 class="text-xs font-black uppercase text-blue-500 mb-2">Tactical Scouting Intel</h3>
+                <p id="intel-text" class="text-sm text-slate-300 leading-relaxed min-h-[4rem]"></p>
+            </div>
+            <div id="stats-grid" class="grid grid-cols-2 gap-3"></div>
+        </div>
+    </main>
+
+<script>
+const CATEGORIES = {
+    "No. 9 Specialists": ['haaland', 'kane', 'benzema'],
+    "Advanced Playmakers": ['bruno', 'wirtz', 'odegaard', 'musiala'],
+    "High-Volume Wingers": ['saka', 'vinicius', 'yildiz']
+};
+
+const PLAYERS = {
+    bruno: {
+        name: "Bruno Fernandes",
+        role: "The Deep Creator",
+        topStat: "124 Chances Created",
+        color: "#ef4444",
+        intel: "A high-volume engine of distribution. Bruno's sonar reveals primary passing clusters originating from the middle third, favoring the right half-space. His deadliest attribute is 'Diagonal Switching'—isolating wingers with 40-yard vertical through-balls or cross-field pings.",
+        radar: [70, 99, 88, 75, 82, 98],
+        stats: { "Passes Final 3rd": "24.2", "xG Assisted": "0.38", "Long Pass Acc.": "64%", "Kms Covered": "11.8" },
+        visual: `
+            <!-- Danger Zone Highlight -->
+            <rect x="350" y="280" width="120" height="150" fill="#ef4444" fill-opacity="0.1" stroke="#ef4444" stroke-dasharray="2,2" />
+            
+            <!-- Bruno Hub Position -->
+            <circle cx="400" cy="350" r="10" fill="#ef4444" stroke="white" stroke-width="2">
+                <animate attributeName="r" values="10;12;10" dur="2s" repeatCount="indefinite" />
+            </circle>
+            
+            <!-- Forward-Center Through Ball -->
+            <path d="M 400 350 L 650 250" stroke="#ef4444" stroke-width="2" stroke-dasharray="5,5">
+                <animate attributeName="stroke-dashoffset" from="100" to="0" dur="2s" repeatCount="indefinite" />
+            </path>
+            <circle r="4" fill="white" class="ball-unit">
+                <animateMotion path="M 400 350 L 650 250" dur="2s" repeatCount="indefinite" />
+            </circle>
+
+            <!-- Diagonal Switch (Forward-Right) -->
+            <path d="M 400 350 L 650 450" stroke="#ef4444" stroke-width="2" stroke-dasharray="5,5">
+                <animate attributeName="stroke-dashoffset" from="100" to="0" dur="1.5s" repeatCount="indefinite" />
+            </path>
+            <circle r="4" fill="white" class="ball-unit">
+                <animateMotion path="M 400 350 L 650 450" dur="1.5s" repeatCount="indefinite" />
+            </circle>
+
+            <text x="360" y="445" fill="#ef4444" font-size="9" font-weight="900">RIGHT HALF-SPACE HUB</text>
+        `
+    },
+    haaland: {
+        name: "Erling Haaland", role: "The Modern Spearhead", topStat: "0.99 Goals/90", color: "#3b82f6",
+        intel: "Optimized for 'Blind-Side' movement. Haaland positions himself between the far-side CB and Fullback.",
+        radar: [98, 40, 50, 20, 95, 90],
+        stats: { "npxG": "0.82", "Box Touches": "7.4", "Shot Conv.": "29%", "Top Speed": "36.2" },
+        visual: `<circle r="10" fill="#3b82f6" stroke="white" stroke-width="2"><animateMotion path="M 600 200 Q 650 150, 735 245" dur="3s" repeatCount="indefinite" /></circle>`
+    },
+    benzema: {
+        name: "Karim Benzema",
+        role: "The Link-Up Lethalist",
+        topStat: "15 UCL Goals (21/22)",
+        color: "#facc15",
+        intel: "Historical Focus: 2021/22 UCL Run. Benzema operated as a '9.5', dropping into the left half-space to initiate play before arriving late in the box. His deadliest attribute was his 'Pause & Accelerate' movement—waiting for the ball to develop before ghosting between center-backs.",
+        radar: [92, 94, 91, 55, 88, 97],
+        stats: { "UCL KO Goals": "10", "xG Overperf.": "+4.2", "Prog. Passes": "4.1", "Shot Conv.": "31%" },
+        visual: `
+            <line x1="600" y1="150" x2="600" y2="350" stroke="#ef4444" stroke-dasharray="5,5" opacity="0.5" />
+            <circle r="10" fill="#facc15" stroke="white" stroke-width="2">
+                <animateMotion path="M 450 150 Q 550 200, 480 250 L 750 250" keyTimes="0; 0.3; 0.6; 1" dur="5s" repeatCount="indefinite" />
+            </circle>
+            <circle r="4" fill="white" class="ball-unit">
+                <animateMotion path="M 450 150 Q 550 200, 480 250 L 750 250" keyTimes="0; 0.3; 0.6; 1" dur="5s" repeatCount="indefinite" />
+            </circle>
+            <text x="410" y="130" fill="#facc15" font-size="10" font-weight="900">1. LINK UP (LEFT CHANNEL)</text>
+            <text x="600" y="230" fill="#facc15" font-size="10" font-weight="900">2. LATE BOX SURGE</text>
+        `
+    },
+    kane: {
+        name: "Harry Kane", role: "The Hybrid Pivot", topStat: "1.18 G+A/90", color: "#60a5fa",
+        intel: "The master of the vertical drop. Kane vacates the #9 space to drop into the #10 zone.",
+        radar: [92, 95, 75, 40, 70, 95],
+        stats: { "Prog. Passes": "4.8", "Key Passes": "2.1", "Long Ball %": "78%", "xG Created": "0.45" },
+        visual: `<circle r="10" fill="#3b82f6" stroke="white" stroke-width="2"><animateMotion path="M 650 250 L 450 250" dur="4s" repeatCount="indefinite" /></circle>`
+    },
+    wirtz: {
+        name: "Florian Wirtz", role: "Advanced Playmaker", topStat: "0.42 xT/90", color: "#a855f7",
+        intel: "Operates exclusively in the half-spaces. Wirtz uses micro-dribbles to attract pressure.",
+        radar: [75, 96, 92, 40, 65, 98],
+        stats: { "xT Carry": "0.38", "Succ. Turns": "92%", "Final 3rd %": "88%", "SCA": "6.2" },
+        visual: `<circle r="10" fill="#a855f7" stroke="white" stroke-width="2"><animateMotion path="M 350 250 Q 400 240, 480 200" dur="5s" repeatCount="indefinite" /></circle>`
+    },
+    odegaard: {
+        name: "Martin Ødegaard", role: "The Press Leader", topStat: "94th Perc. Press", color: "#d946ef",
+        intel: "Primary orchestrator of the high press. curved runs to shadow-cover the opponent's pivot.",
+        radar: [68, 98, 90, 85, 70, 95],
+        stats: { "Press Eff.": "34%", "Interceptions": "1.2", "Dist. Run": "12.4km", "Rec. Won": "6.2" },
+        visual: `<circle r="10" fill="#d946ef" stroke="white" stroke-width="2"><animateMotion path="M 300 250 Q 150 200, 120 250" dur="4s" repeatCount="indefinite" /></circle>`
+    },
+    musiala: {
+        name: "Jamal Musiala", role: "The Dribbling 10", topStat: "4.1 Succ. Dribbles", color: "#c026d3",
+        intel: "Utilizes 'Snake-Dribbling' through central blocks. Thrive in high-density areas.",
+        radar: [82, 90, 98, 30, 75, 94],
+        stats: { "Take-ons": "7.2", "Prog. Carries": "5.8", "Fouls Drawn": "2.8", "Dribble %": "62%" },
+        visual: `<circle r="10" fill="#c026d3" stroke="white" stroke-width="2"><animateMotion path="M 300 250 Q 350 280, 400 250 T 500 250" dur="3s" repeatCount="indefinite" /></circle>`
+    },
+    saka: {
+        name: "Bukayo Saka", role: "High-Volume Winger", topStat: "5.2 Crosses/90", color: "#10b981",
+        intel: "Forces defensive 'gravity'. Saka stays wide to isolate fullbacks 1v1.",
+        radar: [85, 88, 96, 55, 78, 92],
+        stats: { "1v1 Att.": "8.4", "Dribble %": "58%", "Cross Acc.": "34%", "xT Cross": "0.22" },
+        visual: `<circle r="10" fill="#10b981" stroke="white" stroke-width="2"><animateMotion path="M 400 50 L 600 50 L 680 150" dur="5s" repeatCount="indefinite" /></circle>`
+    },
+    vinicius: {
+        name: "Vinícius Júnior", role: "The Inside Catalyst", topStat: "0.62 npxG+xA", color: "#059669",
+        intel: "The 'Inside-Diagonal Burst'. Vini starts wide to fix the FB, then uses explosive acceleration to cut diagonally.",
+        radar: [94, 85, 99, 20, 80, 88],
+        stats: { "Top Speed": "36.4", "Prog. Carries": "9.1", "Key Passes": "2.4", "Final 3rd %": "82%" },
+        visual: `<circle r="10" fill="#059669" stroke="white" stroke-width="2"><animateMotion path="M 550 450 L 620 380 L 630 370 L 750 250" keyTimes="0; 0.4; 0.5; 1" dur="4s" repeatCount="indefinite" /></circle>`
+    },
+    yildiz: {
+        name: "Kenan Yıldız", role: "The Technical Inverter", topStat: "88th Perc. Carry", color: "#047857",
+        intel: "Deadly from the 'Left Channel'. Yıldız excels at inverted runs, driving into central zones to strike.",
+        radar: [82, 86, 94, 45, 76, 91],
+        stats: { "Succ. Dribbles": "3.8", "Prog. Passes": "4.2", "Carry Distance": "210m", "Shooting %": "44%" },
+        visual: `<circle r="10" fill="#047857" stroke="white" stroke-width="2"><animateMotion path="M 300 100 Q 450 120, 550 230" dur="4s" repeatCount="indefinite" /></circle>`
+    }
+};
+
+function renderRadar(stats, color) {
+    const svg = document.getElementById('radar-svg');
+    const center = 50, radius = 40;
+    const angles = [0, 60, 120, 180, 240, 300].map(a => (a - 90) * Math.PI / 180);
+    const lines = angles.map(a => `<line x1="${center}" y1="${center}" x2="${center + Math.cos(a) * radius}" y2="${center + Math.sin(a) * radius}" stroke="rgba(255,255,255,0.1)" stroke-width="0.5" />`).join('');
+    const points = stats.map((s, i) => {
+        const r = (s/100) * radius;
+        return `${center + Math.cos(angles[i]) * r},${center + Math.sin(angles[i]) * r}`;
+    }).join(' ');
+    svg.innerHTML = `${lines}<polygon points="${points}" fill="${color}" fill-opacity="0.3" stroke="${color}" stroke-width="1.5" />`;
+}
+
+function selectPlayer(id) {
+    const p = PLAYERS[id];
+    if (!p) return;
+    document.querySelectorAll('.player-card').forEach(el => el.classList.remove('active'));
+    const card = document.getElementById(`card-${id}`);
+    if (card) card.classList.add('active');
+    document.getElementById('player-name').innerText = p.name;
+    document.getElementById('role-tag').innerText = p.role;
+    document.getElementById('top-stat').innerText = p.topStat;
+    document.getElementById('intel-text').innerText = p.intel;
+    document.getElementById('visual-layer').innerHTML = p.visual;
+    const grid = document.getElementById('stats-grid');
+    grid.innerHTML = Object.entries(p.stats).map(([k, v]) => `
+        <div class="bg-slate-900 border border-slate-800 p-2 rounded-lg flex flex-col justify-center">
+            <span class="text-[8px] text-slate-500 font-bold uppercase tracking-widest">${k}</span>
+            <span class="text-sm font-black font-mono text-white">${v}</span>
+        </div>
+    `).join('');
+    renderRadar(p.radar, p.color);
+}
+
+function init() {
+    const container = document.getElementById('player-list');
+    Object.entries(CATEGORIES).forEach(([catName, playerIds]) => {
+        const catDiv = document.createElement('div');
+        catDiv.innerHTML = `<h3 class="text-[10px] font-black text-slate-600 uppercase mb-2 tracking-widest">${catName}</h3>`;
+        const group = document.createElement('div');
+        group.className = 'flex flex-col gap-2';
+        playerIds.forEach(id => {
+            const p = PLAYERS[id];
+            const div = document.createElement('div');
+            div.id = `card-${id}`;
+            div.className = 'player-card p-3 rounded-xl flex items-center justify-between';
+            div.setAttribute('draggable', true);
+            div.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', id); });
+            div.onclick = () => selectPlayer(id);
+            div.innerHTML = `<div><p class="text-xs font-black uppercase text-white">${p.name}</p><p class="text-[9px] text-slate-500 font-bold">${p.role}</p></div><div class="w-1.5 h-6 rounded-full" style="background:${p.color}"></div>`;
+            group.appendChild(div);
+        });
+        catDiv.appendChild(group);
+        container.appendChild(catDiv);
+    });
+
+    const pitch = document.getElementById('pitch-container');
+    const overlay = document.getElementById('drop-zone-overlay');
+    pitch.addEventListener('dragover', (e) => { e.preventDefault(); pitch.classList.add('drag-over'); overlay.style.opacity = '1'; });
+    pitch.addEventListener('dragleave', () => { pitch.classList.remove('drag-over'); overlay.style.opacity = '0'; });
+    pitch.addEventListener('drop', (e) => { e.preventDefault(); pitch.classList.remove('drag-over'); overlay.style.opacity = '0'; selectPlayer(e.dataTransfer.getData('text/plain')); });
+
+    selectPlayer('bruno');
+}
+
+window.onload = init;
+</script>
+</body>
+</html>
